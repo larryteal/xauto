@@ -1,0 +1,51 @@
+name: Fetch X
+
+permissions:
+  contents: write
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+
+    services:
+      vpn:
+        image: larryteal/cwcid:latest
+        options: >-
+          --cap-add=NET_ADMIN
+          --sysctl net.ipv6.conf.all.disable_ipv6=0
+          --sysctl net.ipv4.conf.all.src_valid_mark=1
+          --health-cmd="curl -fsSL https://www.cloudflare.com/cdn-cgi/trace/ | grep warp=on || exit 1"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=5
+          --health-start-period=5s
+        # --log-driver=none
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Get timestamp
+        id: get-timestamp
+        run: echo "timestamp=$(date -u +'%Y%m%dT%H%M%SZ')" >> $GITHUB_OUTPUT
+        
+      - name: Run task
+        run: |
+          mkdir -p tweets
+          docker run --rm --network=container:${{ job.services.vpn.id }} -v $PWD:/app -w /app larryteal/curlpy:latest python main.py $OAUTH_TOKEN $OAUTH_TOKEN_SECRET
+        env:
+          OAUTH_TOKEN: ${{ secrets.OAUTH_TOKEN }}
+          OAUTH_TOKEN_SECRET: ${{ secrets.OAUTH_TOKEN_SECRET }}
+      
+      - name: Commit and push new info file
+        run: |
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tweets/*.json
+          git commit -m "Add info for ${{ steps.get-timestamp.outputs.timestamp }} UTC" || echo "Nothing to commit"
+          git push    
